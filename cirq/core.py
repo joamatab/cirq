@@ -77,36 +77,44 @@ class Domain(DOMWidget):
         if p1.domain is not p2.domain:
             return False
 
-        if p1.domain.causal:
+        if not p1.domain.causal:
+            return (
+                False
+                if p1 in p2.connections_in or p1 in p2.connections_out
+                else (p1, p2)
+            )
 
-            p1t = p1.is_target
-            p1s = p1.is_source
-            p2t = p2.is_target
-            p2s = p2.is_source
+        p1t = p1.is_target
+        p1s = p1.is_source
+        p2t = p2.is_target
+        p2s = p2.is_source
 
-            if p1s and p2t:
-                if p2 in p1.connections_out:
-                    return False
-                if p1.domain.one2one:
-                    if len(p1.connections_out) + len(p1.connections_in) > 0:
-                        return False
-                return p1, p2
-            if p2s and p1t:
-                if p2 in p1.connections_in:
-                    return False
-                if p1.domain.one2one:
-                    if len(p1.connections_in) + len(p2.connections_out) > 0:
-                        return False
-
-                return p2, p1
-            return False
-        else:
-            if p1 in p2.connections_in or p1 in p2.connections_out:
+        if p1s and p2t:
+            if p2 in p1.connections_out:
                 return False
-            return p1, p2
+            else:
+                return (
+                    False
+                    if p1.domain.one2one
+                    and len(p1.connections_out) + len(p1.connections_in) > 0
+                    else (p1, p2)
+                )
+
+        if p2s and p1t:
+            if p2 in p1.connections_in:
+                return False
+            else:
+                return (
+                    False
+                    if p1.domain.one2one
+                    and len(p1.connections_in) + len(p2.connections_out) > 0
+                    else (p2, p1)
+                )
+
+        return False
 
     def __repr__(self):
-        return "Domain(name={}, causal={}, one2one={})".format(self.name, self.causal, self.one2one)
+        return f"Domain(name={self.name}, causal={self.causal}, one2one={self.one2one})"
 
     def _ipython_display_(self, **kwargs):
         return repr(self)
@@ -152,7 +160,7 @@ class HasPorts(HasTraits):
             p._parent = self
         self.layout_ports(new)
         self.p = AttrDict({p.name: p for p in new})
-        if not len(self.p) == len(new):
+        if len(self.p) != len(new):
             raise ValueError("Ports need all have unique names.")
 
     def layout_ports(self, ports):
@@ -231,11 +239,8 @@ class Port(DOMWidget):
 
     # noinspection PyUnusedLocal
     def _direction_changed(self, name, old, new):
-        if self.domain:
-            # noinspection PyUnresolvedReferences
-            if self.domain.causal:
-                if new not in ["in", "out"]:
-                    raise ValueError("Causal domains can only have associated input and output ports")
+        if self.domain and self.domain.causal and new not in ["in", "out"]:
+            raise ValueError("Causal domains can only have associated input and output ports")
 
     @property
     def is_ext(self):
@@ -257,9 +262,7 @@ class Port(DOMWidget):
         return Port(name=self.name, domain=self.domain, direction=self.direction)
 
     def __repr__(self):
-        if self._parent:
-            return "{}.p.{}".format(self._parent.name, self.name)
-        return self.name
+        return f"{self._parent.name}.p.{self.name}" if self._parent else self.name
 
 
 def inputs(names, domain):
@@ -345,16 +348,18 @@ class ComponentType(HasPorts, DOMWidget):
                 _inner_color_selected = Unicode("red")
                 _label_color = Unicode("white")
         """
-        default_options = dict(
-            _layout_ports=self._layout_ports,
-            _inner_svg=self._inner_svg,
-            _x_label=self._x_label,
-            _y_label=self._y_label,
-            _inner_color=self._inner_color,
-            _inner_color_selected=self._inner_color_selected,
-            _label_color=self._label_color,
+        default_options = (
+            dict(
+                _layout_ports=self._layout_ports,
+                _inner_svg=self._inner_svg,
+                _x_label=self._x_label,
+                _y_label=self._y_label,
+                _inner_color=self._inner_color,
+                _inner_color_selected=self._inner_color_selected,
+                _label_color=self._label_color,
+            )
+            | options
         )
-        default_options.update(options)
 
         return ComponentInstance(
             name=name,
@@ -390,10 +395,7 @@ class ComponentInstance(HasPorts, DOMWidget):
     _label_color = Unicode("white", sync=True)
 
     def __repr__(self):
-        if self._circuit:
-            # noinspection PyTypeChecker
-            return repr(self._circuit) + ".c." + self.name
-        return self.name
+        return f"{repr(self._circuit)}.c.{self.name}" if self._circuit else self.name
 
 
 class Connection(DOMWidget):
@@ -569,11 +571,11 @@ class Circuit(ComponentType):
 
         self.c = AttrDict({c.name: c for c in new})
 
-        if not len(self.c) == len(new):
+        if len(self.c) != len(new):
             raise ValueError("Component instances need all have unique names.")
 
         for ci in new:
-            if not ci._circuit is self:
+            if ci._circuit is not self:
                 ci._circuit = self
                 kkx = kk // ny
                 kky = kk % ny
@@ -602,8 +604,7 @@ class Circuit(ComponentType):
         :param m: Received message object
         """
         if m == "click":
-            se = self.selected_element
-            if se:
+            if se := self.selected_element:
                 if isinstance(se, Port):
                     if p is self.selected_element:
                         self.selected_element = None
@@ -835,9 +836,7 @@ class Circuit(ComponentType):
                                for k, v in obj.get("component_instances", {}).items()}
 
         def _resolve_port(cn, pn):
-            if cn == name:
-                return ports_dict[pn]
-            return component_instances[cn].p[pn]
+            return ports_dict[pn] if cn == name else component_instances[cn].p[pn]
 
         ret = Circuit(name=name, ports=ports,
                       component_instances=component_instances.values())
@@ -1141,8 +1140,10 @@ class CircuitBuilder(PopupWidget):
         Delete the currently selected component.
         """
         c = self.circuit.selected_element
-        if not isinstance(c, ComponentInstance) \
-                or not c in self.circuit.component_instances:
+        if (
+            not isinstance(c, ComponentInstance)
+            or c not in self.circuit.component_instances
+        ):
             return
         self.circuit.component_instances = filter(lambda comp: comp is not c,
                                                   self.circuit.component_instances)
@@ -1159,8 +1160,7 @@ class CircuitBuilder(PopupWidget):
         Delete the currently selected external port.
         """
         p = self.circuit.selected_element
-        if not isinstance(p, Port) \
-                or not p in self.circuit.ports:
+        if not isinstance(p, Port) or p not in self.circuit.ports:
             return
         self.circuit.ports = filter(lambda pp: pp is not p,
                                     self.circuit.ports)
@@ -1177,8 +1177,7 @@ class CircuitBuilder(PopupWidget):
         Move the selected port up in the overall order of external ports.
         """
         p = self.circuit.selected_element
-        if not isinstance(p, Port) \
-                or not p in self.circuit.ports:
+        if not isinstance(p, Port) or p not in self.circuit.ports:
             return
         ps = list(self.circuit.ports)
         ii = ps.index(p)
@@ -1192,8 +1191,7 @@ class CircuitBuilder(PopupWidget):
         Move the selected port down in the overall order of external ports.
         """
         p = self.circuit.selected_element
-        if not isinstance(p, Port) \
-                or not p in self.circuit.ports:
+        if not isinstance(p, Port) or p not in self.circuit.ports:
             return
         ps = list(self.circuit.ports)
         ii = ps.index(p)
@@ -1213,8 +1211,7 @@ class CircuitBuilder(PopupWidget):
         self._update_port_directions()
 
     def _handle_circuit_selection(self):
-        e = self.circuit.selected_element
-        if e:
+        if e := self.circuit.selected_element:
             if isinstance(e, Port) and e.is_ext:
                 self.back()
                 self.modify_port_dialog(e)
@@ -1240,21 +1237,19 @@ class CircuitBuilder(PopupWidget):
 
     # noinspection PyUnresolvedReferences
     def _add_component(self, *_):
-        ctype = self._components_by_name[self._add_comp_type.value_name]
         cname = self._add_comp_name.value
 
-        if len(cname) and not cname in self.circuit.c:
+        if len(cname) and cname not in self.circuit.c:
+            ctype = self._components_by_name[self._add_comp_type.value_name]
             new_comp = ctype.make_instance(cname)
             self.circuit.component_instances = self.circuit.component_instances + [new_comp]
 
     # noinspection PyUnresolvedReferences
     def _add_port(self, *_):
-        d = self._domains_by_name[self._add_port_domain.value_name]
-        direction = self._add_port_direction.value_name
-        if not d.causal:
-            direction = "inout"
         pname = self._add_port_name.value
-        if len(pname) and not pname in self.circuit.p:
+        if len(pname) and pname not in self.circuit.p:
+            d = self._domains_by_name[self._add_port_domain.value_name]
+            direction = self._add_port_direction.value_name if d.causal else "inout"
             newp = Port(name=pname, domain=d, direction=direction)
             self.circuit.ports = self.circuit.ports + [newp]
 
@@ -1263,7 +1258,7 @@ class CircuitBuilder(PopupWidget):
         if not isinstance(c, ComponentInstance):
             return
         newname = self._mod_comp_name.value
-        if len(newname) and not newname in self.circuit.c:
+        if len(newname) and newname not in self.circuit.c:
             del self.circuit.c[c.name]
             c.name = newname
             self.circuit.c[c.name] = c
@@ -1273,7 +1268,7 @@ class CircuitBuilder(PopupWidget):
         if not isinstance(p, Port):
             return
         newname = self._mod_port_name.value
-        if len(newname) and not newname in self.circuit.p:
+        if len(newname) and newname not in self.circuit.p:
             del self.circuit.p[p.name]
             p.name = newname
             self.circuit.p[p.name] = p

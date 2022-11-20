@@ -22,8 +22,8 @@ def test_mach_zehnder():
     fm = Domain(name="fieldmode", causal=True, one2one=True)
     el = Domain(name="electrical", causal=False, _color="purple")
 
-    ins = [Port(name="In{}".format(k + 1), domain=fm, direction="in") for k in range(5)]
-    outs = [Port(name="Out{}".format(k + 1), domain=fm, direction="out") for k in range(5)]
+    ins = [Port(name=f"In{k + 1}", domain=fm, direction="in") for k in range(5)]
+    outs = [Port(name=f"Out{k + 1}", domain=fm, direction="out") for k in range(5)]
     el_port = Port(name="Control", domain=el, direction="inout")
 
     bs_type = ComponentType(name="Beamsplitter", ports=clone_ports(ins[:2] + outs[:2]))
